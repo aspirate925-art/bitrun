@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>비트런 손동작 리모컨</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Do+Hyeon&family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<style>
+/* Layout: 카메라(왼쪽 넓게) + 조종 패널(오른쪽) 2단, 좁은 화면에서는 1단 */
+:root {
+  --bg: #eef1ec;
+  --panel: #ffffff;
+  --ink: #18201b;
+  --muted: #5d6a61;
+  --line: #d3dad3;
+  --accent: #0b7a55;        /* 마이크로비트 기판 초록 */
+  --accent-ink: #ffffff;
+  --accent-soft: #d9efe5;
+  --led: #e8402a;           /* LED 매트릭스 빨강 */
+  --warn: #b5650d;
+  --screen: #0e1411;
+  --f-display: "Do Hyeon", "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --f-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #101512; --panel: #18201b; --ink: #e6ece7; --muted: #9aa89f; --line: #2c3730;
+    --accent: #3fbf8a; --accent-ink: #08130d; --accent-soft: #1d3a2d; --led: #ff6a52; --warn: #e3a04f; --screen: #050806;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #101512; --panel: #18201b; --ink: #e6ece7; --muted: #9aa89f; --line: #2c3730;
+  --accent: #3fbf8a; --accent-ink: #08130d; --accent-soft: #1d3a2d; --led: #ff6a52; --warn: #e3a04f; --screen: #050806;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font: 15px/1.55 var(--f-body);
+  word-break: keep-all; overflow-wrap: anywhere;
+  padding: 20px max(16px, env(safe-area-inset-left, 0px)) 40px max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 18px; }
+header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+h1 { font: 400 2rem/1.1 var(--f-display); margin: 0; letter-spacing: .01em; text-wrap: balance; }
+h1 small { display: block; font: 500 .8rem/1.4 var(--f-body); color: var(--muted); letter-spacing: 0; margin-top: 4px; }
+h2 { font: 700 .78rem/1 var(--f-body); letter-spacing: .08em; color: var(--muted); margin: 0 0 12px; }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); font-weight: 500; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+.pill.on .dot { background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.pill.busy .dot { background: var(--warn); }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; min-width: 0; }
+.col { display: grid; gap: 18px; min-width: 0; }
+
+.stage { position: relative; aspect-ratio: 4 / 3; max-width: 100%; background: var(--screen); border-radius: 10px; overflow: hidden; }
+.stage canvas { width: 100%; height: 100%; display: block; }
+.stage video { display: none; }
+.stage .empty { position: absolute; inset: 0; display: grid; place-content: center; gap: 10px; text-align: center; color: #c8d3cc; padding: 20px; }
+.stage .empty b { font: 400 1.6rem var(--f-display); color: #fff; }
+.badge { position: absolute; left: 12px; top: 12px; padding: 6px 12px; border-radius: 8px; background: rgba(0,0,0,.55); color: #fff; font: 500 .85rem var(--f-body); }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; align-items: center; }
+.toolbar label { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: .9rem; }
+
+button { font: 700 .95rem var(--f-body); border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 10px 16px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* 현재 명령: 마이크로비트 LED 매트릭스처럼 */
+.now { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center; }
+.matrix { display: grid; grid-template-columns: repeat(5, 14px); gap: 6px; padding: 12px; background: var(--screen); border-radius: 10px; }
+.matrix i { width: 14px; height: 14px; border-radius: 3px; background: #2a1512; }
+.matrix i.on { background: var(--led); box-shadow: 0 0 8px var(--led); }
+.now .cmd { font: 400 2.4rem/1 var(--f-display); }
+.now .data { font: 500 .9rem var(--f-mono); color: var(--muted); margin-top: 6px; }
+
+.pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-width: 300px; margin: 0 auto; }
+.pad button { padding: 14px 6px; font-size: 1rem; }
+.pad .stop { background: var(--led); color: #fff; border-color: var(--led); }
+.pad button.active { outline: 3px solid var(--accent); outline-offset: 1px; }
+.hint { color: var(--muted); font-size: .85rem; margin: 10px 0 0; text-align: center; }
+
+.legend { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.legend li { display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); }
+.legend li.hit { border-color: var(--accent); background: var(--accent-soft); }
+.legend .g { font-size: 1.6rem; text-align: center; }
+.legend .t b { display: block; }
+.legend .t span { color: var(--muted); font-size: .85rem; }
+.legend code { font: 500 .85rem var(--f-mono); color: var(--accent); }
+
+.log { font: 500 .82rem/1.6 var(--f-mono); color: var(--muted); max-height: 150px; overflow: auto; margin: 0; padding: 0; list-style: none; }
+.log li { display: flex; gap: 10px; }
+.log time { opacity: .7; }
+.msg { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); font-size: .9rem; }
+.msg.err { background: color-mix(in srgb, var(--led) 18%, var(--panel)); }
+
+details { border-top: 1px solid var(--line); padding-top: 12px; }
+summary { cursor: pointer; font-weight: 700; }
+pre { overflow-x: auto; background: var(--screen); color: #d8e6dc; padding: 14px; border-radius: 10px; font: .8rem/1.5 var(--f-mono); }
+ol.steps { padding-left: 1.2em; margin: 8px 0; max-width: 70ch; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>비트런 손동작 리모컨<small>카메라로 손 모양을 인식해서 블루투스로 마이크로비트에 명령을 보냅니다</small></h1>
+    <span class="pill" id="btPill"><span class="dot"></span><span id="btText">블루투스 연결 안 됨</span></span>
+  </header>
+
+  <p class="msg err" id="support" hidden></p>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>카메라 · 손 인식</h2>
+      <div class="stage">
+        <video id="video" playsinline muted></video>
+        <canvas id="canvas" width="640" height="480"></canvas>
+        <div class="empty" id="empty"><b>카메라를 켜 주세요</b><span>손을 화면 가운데에 보여 주면 손가락 관절을 찾아 동작을 판단해요.</span></div>
+        <span class="badge" id="seen" hidden>손 없음</span>
+      </div>
+      <div class="toolbar">
+        <button class="primary" id="camBtn">카메라 켜기</button>
+        <button id="gestBtn" disabled>손 인식 멈추기</button>
+        <label for="stable">인식 안정도
+          <input type="range" id="stable" min="2" max="12" value="6">
+          <span id="stableVal">6</span>프레임
+        </label>
+      </div>
+      <p class="hint" id="modelState">손 인식 모델은 카메라를 켤 때 불러와요. 인터넷 연결이 필요합니다.</p>
+    </section>
+
+    <div class="col">
+      <section class="panel">
+        <h2>1. 블루투스 연결</h2>
+        <div class="toolbar" style="margin-top:0">
+          <button class="primary" id="connectBtn">마이크로비트 연결</button>
+          <button id="reconnectBtn" disabled>다시 연결</button>
+          <button id="disconnectBtn" disabled>연결 끊기</button>
+        </div>
+        <p class="hint" style="text-align:left">목록에서 <b>BBC micro:bit [5글자 이름]</b>을 고르고 <b>페어링</b>을 누르세요.<br>연결이 끊기거나 이상하면 마이크로비트의 <b>A+B 버튼을 같이 눌러 리셋</b>한 뒤 <b>다시 연결</b>을 누르세요.</p>
+      </section>
+
+      <section class="panel">
+        <h2>2. 현재 명령</h2>
+        <div class="now">
+          <div class="matrix" id="matrix" aria-hidden="true"></div>
+          <div>
+            <div class="cmd" id="cmdName">정지</div>
+            <div class="data">보낸 데이터: <span id="cmdData">-</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>손 동작 표</h2>
+        <ul class="legend" id="legend">
+          <li data-cmd="forward"><span class="g">✋</span><span class="t"><b>전진</b><span>손바닥을 활짝 펴기</span></span><code>forward</code></li>
+          <li data-cmd="backward"><span class="g">✊</span><span class="t"><b>후진</b><span>주먹 쥐기</span></span><code>backward</code></li>
+          <li data-cmd="left"><span class="g">👈</span><span class="t"><b>좌회전</b><span>검지로 왼쪽 가리키기</span></span><code>left</code></li>
+          <li data-cmd="right"><span class="g">👉</span><span class="t"><b>우회전</b><span>검지로 오른쪽 가리키기</span></span><code>right</code></li>
+          <li data-cmd="stop"><span class="g">🚫</span><span class="t"><b>정지</b><span>손을 내리거나 다른 모양</span></span><code>stop</code></li>
+        </ul>
+      </section>
+    </div>
+  </div>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>직접 조종 (손 인식이 안 될 때)</h2>
+      <div class="pad">
+        <span></span><button data-cmd="forward">▲ 전진</button><span></span>
+        <button data-cmd="left">◀ 좌회전</button><button data-cmd="stop" class="stop">■ 정지</button><button data-cmd="right">우회전 ▶</button>
+        <span></span><button data-cmd="backward">▼ 후진</button><span></span>
+      </div>
+      <p class="hint">키보드 방향키로도 조종돼요. 스페이스바는 정지입니다.</p>
+    </section>
+    <section class="panel">
+      <h2>전송 기록</h2>
+      <ul class="log" id="log"><li><time>--:--:--</time><span>아직 보낸 명령이 없어요</span></li></ul>
+    </section>
+  </div>
+
+  <section class="panel">
+    <details>
+      <summary>마이크로비트에 넣을 코드 (MakeCode JavaScript)</summary>
+      <ol class="steps">
+        <li>MakeCode에서 확장 <b>servo</b>, <b>bluetooth</b>를 추가합니다.</li>
+        <li>⚙️ → 프로젝트 설정에서 <b>누구나 블루투스로 연결 가능</b>(No Pairing Required)을 켭니다.</li>
+        <li>JavaScript 탭에 아래 코드를 붙여 넣고 다운로드합니다.</li>
+      </ol>
+      <div class="toolbar" style="margin:6px 0"><button id="copyBtn">코드 복사</button><span id="copyMsg" class="hint" style="margin:0"></span></div>
+<pre id="mbCode">let data = ""
+let prevData = ""
+
+function 비트런_전진 () {
+    basic.showArrow(ArrowNames.North)
+    servos.P1.run(100)
+    servos.P2.run(-100)
+}
+function 비트런_후진 () {
+    basic.showArrow(ArrowNames.South)
+    servos.P1.run(-100)
+    servos.P2.run(100)
+}
+function 비트런_좌회전 () {
+    basic.showArrow(ArrowNames.West)
+    servos.P1.run(-100)
+    servos.P2.run(-100)
+}
+function 비트런_우회전 () {
+    basic.showArrow(ArrowNames.East)
+    servos.P1.run(100)
+    servos.P2.run(100)
+}
+function 비트런_정지 () {
+    servos.P1.stop()
+    servos.P2.stop()
+    basic.showIcon(IconNames.Square)
+}
+
+bluetooth.onUartDataReceived(serial.delimiters(Delimiters.NewLine), function () {
+    data = bluetooth.uartReadUntil(serial.delimiters(Delimiters.NewLine))
+    if (data == prevData) {
+        return
+    }
+    prevData = data
+    if (data == "forward") {
+        비트런_전진()
+    } else if (data == "backward") {
+        비트런_후진()
+    } else if (data == "left") {
+        비트런_좌회전()
+    } else if (data == "right") {
+        비트런_우회전()
+    } else {
+        비트런_정지()
+    }
+})
+
+// A+B 버튼을 같이 누르면 마이크로비트 리셋 (뒷면 리셋 버튼 대신)
+input.onButtonPressed(Button.AB, function () {
+    비트런_정지()
+    basic.showString("R")
+    control.reset()
+})
+
+// A 버튼: 블루투스 이름(5글자) 보기
+input.onButtonPressed(Button.A, function () {
+    basic.showString(control.deviceName())
+    basic.showIcon(IconNames.Square)
+})
+
+bluetooth.onBluetoothConnected(function () {
+    basic.showIcon(IconNames.Yes)
+})
+bluetooth.onBluetoothDisconnected(function () {
+    prevData = ""
+    비트런_정지()
+    basic.showIcon(IconNames.No)
+})
+
+basic.showIcon(IconNames.Heart)
+servos.P1.setPulse(1500)
+servos.P2.setPulse(1500)
+비트런_정지()
+bluetooth.startUartService()</pre>
+    </details>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+<script>
+(() => {
+  // ---------- 명령 정의 ----------
+  const CMDS = {
+    forward:  { name: "전진",   leds: ["..#..", ".###.", "#.#.#", "..#..", "..#.."] },
+    backward: { name: "후진",   leds: ["..#..", "..#..", "#.#.#", ".###.", "..#.."] },
+    left:     { name: "좌회전", leds: ["..#..", ".#...", "#####", ".#...", "..#.."] },
+    right:    { name: "우회전", leds: ["..#..", "...#.", "#####", "...#.", "..#.."] },
+    stop:     { name: "정지",   leds: [".....", ".###.", ".#.#.", ".###.", "....."] },
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const matrix = $("matrix");
+  for (let i = 0; i < 25; i++) matrix.appendChild(document.createElement("i"));
+
+  // ---------- 블루투스 (micro:bit UART) ----------
+  const UART_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+  const UART_RX = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // 마이크로비트가 받는 쪽 (쓰기)
+  let device = null, rxChar = null, chain = Promise.resolve();
+  const enc = new TextEncoder();
+
+  function setBt(state, text) {
+    const pill = $("btPill");
+    pill.classList.toggle("on", state === "on");
+    pill.classList.toggle("busy", state === "busy");
+    $("btText").textContent = text;
+    $("connectBtn").disabled = state !== "off";
+    $("disconnectBtn").disabled = state !== "on";
+    $("reconnectBtn").disabled = state === "busy" || !device;
+  }
+
+  if (!navigator.bluetooth) {
+    const s = $("support");
+    s.hidden = false;
+    s.textContent = "이 브라우저는 블루투스 연결을 지원하지 않아요. 노트북·크롬북·안드로이드에서 크롬(또는 엣지)으로 열어 주세요. 아이폰·아이패드는 사용할 수 없어요.";
+    $("connectBtn").disabled = true;
+  }
+
+  async function connect() {
+    try {
+      setBt("busy", "장치 찾는 중…");
+      device = await navigator.bluetooth.requestDevice({
+        filters: [{ namePrefix: "BBC micro:bit" }],
+        optionalServices: [UART_SERVICE],
+      });
+      device.addEventListener("gattserverdisconnected", onDisconnected);
+      await openGatt();
+    } catch (e) {
+      failed(e);
+    }
+  }
+
+  // 이미 고른 마이크로비트에 GATT 연결 (재시도 3번)
+  async function openGatt() {
+    let lastErr = null;
+    for (let i = 1; i <= 3; i++) {
+      try {
+        setBt("busy", "연결 중… (" + i + "/3)");
+        const server = await device.gatt.connect();
+        const service = await server.getPrimaryService(UART_SERVICE);
+        rxChar = await service.getCharacteristic(UART_RX);
+        const nm = (device.name || "micro:bit").replace("BBC micro:bit", "").replace(/[\[\]\s]/g, "") || "micro:bit";
+        setBt("on", nm + " 연결됨");
+        addLog("연결", nm);
+        lastSent = null;
+        send(current);
+        return;
+      } catch (e) {
+        lastErr = e;
+        try { device.gatt.disconnect(); } catch (_) {}
+        await new Promise(r => setTimeout(r, 800));
+      }
+    }
+    throw lastErr;
+  }
+
+  function failed(e) {
+    rxChar = null;
+    setBt("off", "블루투스 연결 안 됨");
+    const m = (e && e.message) || "";
+    if (e && e.name === "NotFoundError" && !/service/i.test(m)) addLog("취소", "장치를 고르지 않았어요");
+    else if (/service/i.test(m)) addLog("오류", "UART 서비스가 없어요. 코드에 '블루투스 UART 서비스 시작'이 있는지, '누구나 블루투스로 연결 가능' 설정 후 다시 다운로드했는지 확인하세요");
+    else if (/pair|auth|security/i.test(m)) addLog("오류", "페어링 거부: 프로젝트 설정에서 '누구나 블루투스로 연결 가능'을 켜고 다시 다운로드하세요");
+    else addLog("오류", (m || "연결 실패") + " → A+B로 마이크로비트를 리셋하고 '다시 연결'을 눌러 보세요");
+  }
+
+  // 다시 연결: 연결을 끊고 같은 마이크로비트에 새로 붙기
+  async function reconnect() {
+    if (!device) { connect(); return; }
+    addLog("다시 연결", "연결을 초기화하는 중");
+    try {
+      device.removeEventListener("gattserverdisconnected", onDisconnected);
+      if (device.gatt.connected) device.gatt.disconnect();
+    } catch (_) {}
+    rxChar = null; lastSent = null; chain = Promise.resolve();
+    await new Promise(r => setTimeout(r, 600));
+    device.addEventListener("gattserverdisconnected", onDisconnected);
+    try { await openGatt(); }
+    catch (e) { failed(e); }
+  }
+  function onDisconnected() {
+    rxChar = null;
+    setBt("off", "블루투스 연결 안 됨");
+    addLog("끊김", "마이크로비트와 연결이 끊어졌어요");
+  }
+  $("connectBtn").addEventListener("click", connect);
+  $("reconnectBtn").addEventListener("click", reconnect);
+  $("disconnectBtn").addEventListener("click", async () => {
+    try { await writeRaw("stop"); } catch (_) {}
+    if (device && device.gatt.connected) device.gatt.disconnect();
+  });
+
+  async function writeRaw(text) {
+    if (!rxChar) return false;
+    const bytes = enc.encode(text + "\n");
+    if (rxChar.writeValueWithoutResponse) {
+      try { await rxChar.writeValueWithoutResponse(bytes); return true; } catch (_) { /* 아래로 */ }
+    }
+    if (rxChar.writeValueWithResponse) await rxChar.writeValueWithResponse(bytes);
+    else await rxChar.writeValue(bytes);
+    return true;
+  }
+
+  // ---------- 명령 보내기 ----------
+  let current = "stop", lastSent = null;
+  function show(cmd) {
+    const c = CMDS[cmd];
+    $("cmdName").textContent = c.name;
+    $("cmdData").textContent = cmd;
+    const cells = matrix.children;
+    c.leds.join("").split("").forEach((ch, i) => cells[i].classList.toggle("on", ch === "#"));
+    document.querySelectorAll("#legend li").forEach(li => li.classList.toggle("hit", li.dataset.cmd === cmd));
+    document.querySelectorAll(".pad button").forEach(b => b.classList.toggle("active", b.dataset.cmd === cmd));
+  }
+  function send(cmd) {
+    current = cmd;
+    show(cmd);
+    if (!rxChar || cmd === lastSent) return;
+    lastSent = cmd;
+    chain = chain.then(() => writeRaw(cmd))
+      .then(ok => { if (ok) addLog("보냄", cmd + "  (" + CMDS[cmd].name + ")"); })
+      .catch(e => { lastSent = null; addLog("오류", "전송 실패: " + ((e && e.message) || e)); });
+  }
+
+  let logEmpty = true;
+  function addLog(kind, text) {
+    const ul = $("log");
+    if (logEmpty) { ul.innerHTML = ""; logEmpty = false; }
+    const li = document.createElement("li");
+    const t = document.createElement("time");
+    t.textContent = new Date().toLocaleTimeString("ko-KR", { hour12: false });
+    const s = document.createElement("span");
+    s.textContent = kind + " · " + text;
+    li.append(t, s);
+    ul.prepend(li);
+    while (ul.children.length > 60) ul.lastChild.remove();
+  }
+
+  // 직접 조종 버튼 · 키보드
+  document.querySelectorAll(".pad button").forEach(b => b.addEventListener("click", () => {
+    manualUntil = performance.now() + 1500;
+    send(b.dataset.cmd);
+  }));
+  let manualUntil = 0;
+  const KEYS = { ArrowUp: "forward", ArrowDown: "backward", ArrowLeft: "left", ArrowRight: "right", " ": "stop" };
+  window.addEventListener("keydown", (e) => {
+    const cmd = KEYS[e.key];
+    if (!cmd || e.target.tagName === "INPUT") return;
+    e.preventDefault();
+    manualUntil = performance.now() + 1500;
+    send(cmd);
+  });
+
+  // ---------- 손 동작 판별 ----------
+  // 손 관절 번호: 0 손목, 5~8 검지, 9~12 중지, 13~16 약지, 17~20 새끼
+  const W = 640, H = 480;
+  function d(a, b) { return Math.hypot((a.x - b.x) * W, (a.y - b.y) * H); }
+  function extended(lm, tip, pip) { return d(lm[tip], lm[0]) > d(lm[pip], lm[0]) * 1.1; }
+
+  function classify(lm) {
+    const idx = extended(lm, 8, 6), mid = extended(lm, 12, 10), ring = extended(lm, 16, 14), pinky = extended(lm, 20, 18);
+    const count = idx + mid + ring + pinky;
+    if (count === 4) return "forward";
+    if (count === 0) return "backward";
+    if (idx && !mid && !ring && !pinky) {
+      // 화면은 거울처럼 보이므로 x를 뒤집어서 "내가 가리키는 쪽"으로 계산
+      const vx = -(lm[8].x - lm[5].x) * W;
+      const vy = (lm[8].y - lm[5].y) * H;
+      if (Math.abs(vx) > Math.abs(vy) * 0.8) return vx < 0 ? "left" : "right";
+    }
+    return "stop";
+  }
+
+  // 같은 결과가 여러 프레임 이어져야 확정 (흔들림 방지)
+  let need = 6, streakCmd = "stop", streak = 0;
+  $("stable").addEventListener("input", (e) => { need = +e.target.value; $("stableVal").textContent = need; });
+  function vote(cmd) {
+    if (cmd === streakCmd) streak++; else { streakCmd = cmd; streak = 1; }
+    if (streak >= need && cmd !== current && performance.now() > manualUntil) send(cmd);
+  }
+
+  // ---------- 카메라 + MediaPipe ----------
+  // 카메라 화면은 모델과 상관없이 바로 나오고, 손 인식 모델은 따로 불러옵니다.
+  const video = $("video"), canvas = $("canvas"), ctx = canvas.getContext("2d");
+  let hands = null, handsReady = false, handsLoading = false, running = false, gestureOn = true, busy = false;
+  let lastLm = null, lastLmAt = 0;
+  const BONES = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+
+  function notice(text, isErr) {
+    const s = $("support");
+    s.hidden = !text;
+    s.textContent = text || "";
+    s.classList.toggle("err", !!isErr);
+  }
+  function modelMsg(t) { $("modelState").textContent = t; }
+
+  // 열린 위치 점검: 미리보기 창(iframe)이나 보안 연결이 아니면 카메라·블루투스가 막힘
+  const inFrame = (() => { try { return window.self !== window.top; } catch (_) { return true; } })();
+  if (inFrame) {
+    notice("지금은 미리보기 창 안에서 열려 있어서 카메라와 블루투스가 막혀 있어요. 파일을 내려받은 뒤, 내려받은 파일을 크롬 창으로 끌어다 놓아 직접 열어 주세요.", true);
+  } else if (!window.isSecureContext) {
+    notice("이 주소에서는 카메라와 블루투스를 쓸 수 없어요. 파일을 크롬으로 직접 열어 주세요 (주소가 file:/// 로 시작해야 해요).", true);
+  }
+
+  function onResults(res) {
+    const lm = res.multiHandLandmarks && res.multiHandLandmarks[0];
+    lastLm = lm || null; lastLmAt = performance.now();
+    if (!gestureOn) return;
+    vote(lm ? classify(lm) : "stop");
+  }
+
+  function draw() {
+    ctx.save();
+    ctx.setTransform(-1, 0, 0, 1, W, 0); // 거울 모드
+    ctx.drawImage(video, 0, 0, W, H);
+    ctx.restore();
+    const badge = $("seen");
+    badge.hidden = false;
+    if (!handsReady) { badge.textContent = handsLoading ? "손 인식 모델 불러오는 중…" : "카메라만 켜짐 (손 인식 꺼짐)"; return; }
+    if (!gestureOn) { badge.textContent = "손 인식 꺼짐"; return; }
+    const lm = performance.now() - lastLmAt < 500 ? lastLm : null;
+    if (!lm) { badge.textContent = "손 없음 → 정지"; return; }
+    const pts = lm.map(p => ({ x: (1 - p.x) * W, y: p.y * H }));
+    const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#0b7a55";
+    ctx.lineWidth = 4; ctx.strokeStyle = accent;
+    BONES.forEach(([a, b]) => { ctx.beginPath(); ctx.moveTo(pts[a].x, pts[a].y); ctx.lineTo(pts[b].x, pts[b].y); ctx.stroke(); });
+    ctx.fillStyle = "#ffffff";
+    pts.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill(); });
+    badge.textContent = "인식: " + CMDS[classify(lm)].name;
+  }
+
+  function loop() {
+    if (!running) return;
+    if (video.readyState >= 2) {
+      draw();
+      if (handsReady && !busy) {
+        busy = true;
+        hands.send({ image: video }).catch(e => console.error(e)).finally(() => { busy = false; });
+      }
+    }
+    requestAnimationFrame(loop);
+  }
+
+  async function loadHands() {
+    if (hands || handsLoading) return;
+    if (typeof Hands === "undefined") {
+      modelMsg("손 인식 모델 파일을 받지 못했어요. 인터넷 연결을 확인하고 새로고침(F5)해 주세요. 학교 방화벽이 cdn.jsdelivr.net을 막고 있을 수도 있어요. 직접 조종 버튼은 계속 쓸 수 있어요.");
+      return;
+    }
+    handsLoading = true;
+    modelMsg("손 인식 모델을 불러오는 중이에요… (처음 한 번은 10초 정도 걸릴 수 있어요)");
+    try {
+      const h = new Hands({ locateFile: (f) => "https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/" + f });
+      h.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
+      h.onResults(onResults);
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("시간 초과")), 45000));
+      await Promise.race([h.initialize(), timeout]);
+      hands = h; handsReady = true;
+      modelMsg("손 인식 준비 완료. 손을 카메라 쪽으로 보여 주세요.");
+    } catch (e) {
+      modelMsg("손 인식 모델을 불러오지 못했어요 (" + ((e && e.message) || e) + "). 새로고침(F5) 후 다시 시도해 주세요. 직접 조종 버튼은 계속 쓸 수 있어요.");
+    } finally {
+      handsLoading = false;
+    }
+  }
+
+  function cameraError(e) {
+    const n = e && e.name;
+    if (n === "NotAllowedError" || n === "SecurityError")
+      return inFrame ? "미리보기 창에서는 카메라를 쓸 수 없어요. 파일을 내려받아 크롬에서 직접 열어 주세요."
+                     : "카메라 권한이 막혀 있어요. 주소창 왼쪽 아이콘을 눌러 카메라를 '허용'으로 바꾸고 새로고침해 주세요.";
+    if (n === "NotReadableError" || n === "TrackStartError" || n === "AbortError")
+      return "다른 프로그램이 카메라를 쓰고 있어요. 바운더리엑스 탭, 줌, 카메라 앱 등을 닫고 다시 눌러 주세요.";
+    if (n === "NotFoundError" || n === "DevicesNotFoundError" || n === "OverconstrainedError")
+      return "카메라를 찾지 못했어요. 웹캠이 연결되어 있는지 확인해 주세요.";
+    return "카메라를 켜지 못했어요: " + ((e && e.message) || e);
+  }
+
+  async function startCamera() {
+    const btn = $("camBtn");
+    if (running) { // 끄기
+      running = false;
+      (video.srcObject && video.srcObject.getTracks() || []).forEach(t => t.stop());
+      video.srcObject = null;
+      $("empty").hidden = false; $("seen").hidden = true;
+      btn.textContent = "카메라 켜기"; $("gestBtn").disabled = true;
+      send("stop");
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      notice(inFrame ? "미리보기 창에서는 카메라를 쓸 수 없어요. 파일을 내려받아 크롬에서 직접 열어 주세요."
+                     : "이 브라우저에서는 카메라를 쓸 수 없어요. 크롬으로 파일을 직접 열어 주세요.", true);
+      return;
+    }
+    btn.disabled = true; btn.textContent = "카메라 켜는 중…";
+    try {
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: W }, height: { ideal: H }, facingMode: "user" }, audio: false });
+      } catch (e1) {
+        if (e1 && (e1.name === "OverconstrainedError" || e1.name === "NotFoundError")) stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        else throw e1;
+      }
+      video.srcObject = stream;
+      await video.play();
+      $("empty").hidden = true;
+      running = true;
+      btn.textContent = "카메라 끄기"; $("gestBtn").disabled = false;
+      loop();
+      loadHands();
+    } catch (e) {
+      notice(cameraError(e), true);
+      modelMsg(cameraError(e));
+      btn.textContent = "카메라 켜기";
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  $("camBtn").addEventListener("click", startCamera);
+  $("gestBtn").addEventListener("click", () => {
+    gestureOn = !gestureOn;
+    $("gestBtn").textContent = gestureOn ? "손 인식 멈추기" : "손 인식 다시 켜기";
+    if (!gestureOn) send("stop");
+  });
+
+  // 코드 복사
+  $("copyBtn").addEventListener("click", async () => {
+    const text = $("mbCode").textContent;
+    try { await navigator.clipboard.writeText(text); $("copyMsg").textContent = "복사했어요. MakeCode JavaScript 탭에 붙여 넣으세요."; }
+    catch (_) {
+      const r = document.createRange(); r.selectNodeContents($("mbCode"));
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+      $("copyMsg").textContent = "코드를 선택해 두었어요. Ctrl+C로 복사하세요.";
+    }
+  });
+
+  // 처음 화면
+  show("stop");
+  ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--screen").trim() || "#0e1411";
+  ctx.fillRect(0, 0, W, H);
+
+  // 테스트용 노출
+  window.__bitrun = { classify };
+})();
+</script>
+</body>
+</html>
